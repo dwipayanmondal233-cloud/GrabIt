@@ -195,11 +195,11 @@ class DownloadService : Service() {
             .joinToString("  |  ")
         item.percent = pct
         item.text = text
-        Queue.changed()
 
         val now = System.currentTimeMillis()
-        if (now - lastNotify > 700) {
+        if (now - lastNotify > 500 || pct >= 100) {
             lastNotify = now
+            Queue.changed()
             notifyProgress(item, text, pct, false)
         }
     }
@@ -207,7 +207,13 @@ class DownloadService : Service() {
     private fun buildRequest(item: Queue.Item, dir: File): YoutubeDLRequest {
         val r = YoutubeDLRequest(item.url)
         r.addOption("--no-playlist")
-        r.addOption("--retries", "3")
+        r.addOption("--no-mtime")
+        r.addOption("--socket-timeout", "20")
+        r.addOption("--no-check-formats")
+        r.addOption("--retries", "5")
+        r.addOption("--fragment-retries", "5")
+        // Parallel fragment fetching improves HLS/DASH downloads on supported sites.
+        r.addOption("--concurrent-fragments", "4")
         r.addOption("-o", dir.absolutePath + "/%(title).80s.%(ext)s")
         if (item.audio) {
             if (item.fmt == "m4a") {

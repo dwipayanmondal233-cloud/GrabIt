@@ -65,7 +65,7 @@ object Engine {
             m.contains("live event") || m.contains("is live") || m.contains("live stream") ->
                 "Live streams are not supported. Try again after it ends."
             m.contains("unsupported url") ->
-                "This link is not supported. Paste a direct link to a video."
+                "This link or website is not supported by the current extractor. Open Settings, tap Update engine, and retry with a public video or reel link."
             m.contains("unable to resolve host") || m.contains("network is unreachable") ||
                 m.contains("timed out") || m.contains("connection") ||
                 m.contains("name resolution") || m.contains("no address associated") ->

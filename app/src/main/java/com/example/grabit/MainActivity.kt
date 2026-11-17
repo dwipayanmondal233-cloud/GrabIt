@@ -23,12 +23,15 @@ import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import com.yausername.youtubedl_android.YoutubeDL
+import com.yausername.youtubedl_android.YoutubeDLRequest
 import java.net.URL
+import java.net.HttpURLConnection
 import java.util.concurrent.Executors
 
 class MainActivity : Activity() {
 
     private val worker = Executors.newSingleThreadExecutor()
+    private val thumbnailWorker = Executors.newSingleThreadExecutor()
 
     private lateinit var urlInput: EditText
     private lateinit var pasteBtn: Button
@@ -355,38 +358,48 @@ class MainActivity : Activity() {
                 return@execute
             }
             try {
-                val info = YoutubeDL.getInstance().getInfo(url)
+                // Skip format-availability probes during metadata lookup. They can add
+                // several network round-trips and are not needed to show the video card.
+                val request = YoutubeDLRequest(url)
+                request.addOption("--no-playlist")
+                request.addOption("--no-warnings")
+                request.addOption("--no-check-formats")
+                request.addOption("--socket-timeout", "15")
+                request.addOption("--retries", "1")
+                request.addOption("--extractor-retries", "1")
+                val info = YoutubeDL.getInstance().getInfo(request)
                 val title = info.title ?: "(no title)"
                 val uploader = info.uploader ?: "unknown"
                 val seconds = info.duration.toString().toLongOrNull() ?: 0L
                 val thumbUrl = info.thumbnail ?: ""
-
-                var bmp: Bitmap? = null
-                if (thumbUrl.isNotEmpty()) {
-                    try {
-                        URL(thumbUrl).openStream().use { bmp = BitmapFactory.decodeStream(it) }
-                    } catch (e: Exception) {
-                        bmp = null
-                    }
-                }
-                val finalBmp = bmp
 
                 runOnUiThread {
                     currentUrl = url
                     currentTitle = title
                     currentUploader = uploader
                     currentThumbUrl = thumbUrl
-                    status.text = "Got it"
+                    status.text = "Ready to download"
                     titleText.text = title
                     metaText.text = uploader + "  |  " + formatTime(seconds)
-                    if (finalBmp != null) {
-                        thumb.setImageBitmap(finalBmp)
-                        thumb.visibility = View.VISIBLE
-                    }
                     applyDefaults()
                     optionsCard.visibility = View.VISIBLE
                     progress.visibility = View.GONE
                     infoBtn.isEnabled = true
+                }
+
+                // Thumbnail loading must never delay the Get Info result.
+                if (thumbUrl.isNotEmpty()) {
+                    thumbnailWorker.execute {
+                        val bitmap = loadThumbnail(thumbUrl)
+                        if (bitmap != null && !isFinishing) {
+                            runOnUiThread {
+                                if (currentUrl == url) {
+                                    thumb.setImageBitmap(bitmap)
+                                    thumb.visibility = View.VISIBLE
+                                }
+                            }
+                        }
+                    }
                 }
             } catch (t: Throwable) {
                 val msg = t.message ?: t.toString()
@@ -396,6 +409,33 @@ class MainActivity : Activity() {
                     infoBtn.isEnabled = true
                 }
             }
+        }
+    }
+
+
+    private fun loadThumbnail(url: String): Bitmap? {
+        var connection: HttpURLConnection? = null
+        return try {
+            connection = (URL(url).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 4000
+                readTimeout = 4000
+                instanceFollowRedirects = true
+                setRequestProperty("User-Agent", "Mozilla/5.0")
+            }
+            connection.connect()
+            connection.inputStream.use { input ->
+                if (connection.contentLengthLong > 8L * 1024L * 1024L) return null
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                val bytes = input.readBytes()
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                val sample = maxOf(1, maxOf(bounds.outWidth / 640, bounds.outHeight / 360))
+                val options = BitmapFactory.Options().apply { inSampleSize = sample }
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+            }
+        } catch (_: Exception) {
+            null
+        } finally {
+            connection?.disconnect()
         }
     }
 
@@ -410,5 +450,6 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         super.onDestroy()
         worker.shutdown()
+        thumbnailWorker.shutdownNow()
     }
 }
