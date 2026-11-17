@@ -1,107 +1,82 @@
 package com.example.grabit
 
-import android.content.Context
-import android.content.res.ColorStateList
-import android.graphics.Typeface
-import android.graphics.drawable.ColorDrawable
-import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.InsetDrawable
-import android.graphics.drawable.StateListDrawable
-import android.view.View
-import android.view.ViewGroup
-import android.widget.Button
-import android.widget.CompoundButton
-import android.widget.EditText
-import android.widget.ProgressBar
-import android.widget.TextView
+import android.app.Application
+import com.yausername.ffmpeg.FFmpeg
+import com.yausername.youtubedl_android.YoutubeDL
 
-object Style {
+object Engine {
 
-    private val CYAN = 0xFF00E5FF.toInt()
-    private val CARD = 0xFF14141C.toInt()
-    private val LINE = 0xFF1E2A33.toInt()
-    private val FIELD = 0xFF0F1117.toInt()
-    private val GRAY = 0xFF667788.toInt()
-    private val DARK_LINE = 0xFF334155.toInt()
-    private val BTN_FILL = 0xFF0F1A1F.toInt()
+    @Volatile
+    private var ready = false
 
-    fun accent(ctx: Context): Int {
-        return when (Prefs.theme(ctx)) {
-            1 -> 0xFF00FF9C.toInt()
-            2 -> 0xFFFF2BD6.toInt()
-            else -> CYAN
+    // Returns null if OK, or an error message.
+    @Synchronized
+    fun ensure(app: Application): String? {
+        if (ready) return null
+        return try {
+            YoutubeDL.getInstance().init(app)
+            FFmpeg.getInstance().init(app)
+            ready = true
+            null
+        } catch (t: Throwable) {
+            t.message ?: t.toString()
         }
     }
 
-    private fun dp(ctx: Context, v: Int): Int =
-        (v * ctx.resources.displayMetrics.density).toInt()
-
-    private fun alpha(color: Int, a: Int): Int = (color and 0x00FFFFFF) or (a shl 24)
-
-    private fun box(ctx: Context, fill: Int, stroke: Int, strokeDp: Int, radiusDp: Int): GradientDrawable {
-        val g = GradientDrawable()
-        g.shape = GradientDrawable.RECTANGLE
-        g.cornerRadius = dp(ctx, radiusDp).toFloat()
-        g.setColor(fill)
-        g.setStroke(dp(ctx, strokeDp), stroke)
-        return g
-    }
-
-    fun apply(root: View) {
-        val ctx = root.context
-        walk(root, ctx, accent(ctx))
-    }
-
-    private fun walk(v: View, ctx: Context, acc: Int) {
-        val bg = v.background
-        if (bg is ColorDrawable && bg.color == CARD) {
-            v.background = box(ctx, CARD, LINE, 1, 14)
-        }
-
-        if (v is CompoundButton) {
-            v.buttonTintList = ColorStateList.valueOf(acc)
-        } else if (v is Button) {
-            styleButton(v, ctx, acc)
-        } else if (v is EditText) {
-            v.background = box(ctx, FIELD, acc, 1, 12)
-            val p = dp(ctx, 12)
-            v.setPadding(p, p, p, p)
-        } else if (v is ProgressBar) {
-            v.progressTintList = ColorStateList.valueOf(acc)
-            v.indeterminateTintList = ColorStateList.valueOf(acc)
-            v.progressBackgroundTintList = ColorStateList.valueOf(LINE)
-        } else if (v is TextView) {
-            if (v.currentTextColor == CYAN) v.setTextColor(acc)
-        }
-
-        if (v is ViewGroup) {
-            for (i in 0 until v.childCount) {
-                walk(v.getChildAt(i), ctx, acc)
-            }
+    fun version(app: Application): String {
+        return try {
+            val v = YoutubeDL.getInstance().version(app)
+            v?.toString() ?: "unknown"
+        } catch (t: Throwable) {
+            "unknown"
         }
     }
 
-    private fun styleButton(b: Button, ctx: Context, acc: Int) {
-        val off = box(ctx, CARD, DARK_LINE, 2, 12)
-        val down = box(ctx, alpha(acc, 0x66), acc, 2, 12)
-        val norm = box(ctx, BTN_FILL, acc, 2, 12)
+    // Returns a short result text. Call from a background thread.
+    fun update(app: Application): String {
+        val err = ensure(app)
+        if (err != null) return "Engine failed to start: $err"
+        return try {
+            val st = YoutubeDL.getInstance().updateYoutubeDL(app, YoutubeDL.UpdateChannel.STABLE)
+            val s = st.toString()
+            if (s.contains("ALREADY")) "Already up to date." else "Update finished."
+        } catch (t: Throwable) {
+            friendly(t.message ?: t.toString())
+        }
+    }
 
-        val states = StateListDrawable()
-        states.addState(intArrayOf(-android.R.attr.state_enabled), off)
-        states.addState(intArrayOf(android.R.attr.state_pressed), down)
-        states.addState(intArrayOf(), norm)
-
-        b.background = InsetDrawable(states, dp(ctx, 2))
-        b.setTextColor(
-            ColorStateList(
-                arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
-                intArrayOf(GRAY, acc)
-            )
-        )
-        b.isAllCaps = false
-        b.stateListAnimator = null
-        b.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-        b.minHeight = dp(ctx, 44)
-        b.minWidth = 0
+    fun friendly(msg: String): String {
+        val m = msg.lowercase()
+        return when {
+            m.contains("no space left") ->
+                "Your storage is full. Free some space and try again."
+            m.contains("a bot") ->
+                "The site wants proof you are not a bot. Wait a while, switch between Wi-Fi and mobile data, or tap Update engine in Settings."
+            m.contains("age-restricted") || m.contains("age restricted") || m.contains("confirm your age") ->
+                "This video is age-restricted. It needs a login, so GrabIt cannot save it."
+            m.contains("drm") ->
+                "This video is protected by DRM. GrabIt cannot save it."
+            m.contains("private") || m.contains("login") || m.contains("logged") ||
+                m.contains("sign in") || m.contains("cookies") || m.contains("members-only") ->
+                "This video is private or needs a login. GrabIt saves public videos only."
+            m.contains("unavailable") || m.contains("not available") || m.contains("removed") ||
+                m.contains("deleted") || m.contains("http error 404") || m.contains("does not exist") ->
+                "This video is not available. It may be removed, deleted or blocked in your country."
+            m.contains("live event") || m.contains("is live") || m.contains("live stream") ->
+                "Live streams are not supported. Try again after it ends."
+            m.contains("unsupported url") ->
+                "This link is not supported. Paste a direct link to a video."
+            m.contains("unable to resolve host") || m.contains("network is unreachable") ||
+                m.contains("timed out") || m.contains("connection") ||
+                m.contains("name resolution") || m.contains("no address associated") ->
+                "No internet. Check your connection and try again."
+            m.contains("unable to extract") || m.contains("unable to download") ||
+                m.contains("http error") || m.contains("extractor") || m.contains("nsig") ->
+                "The site changed and the engine cannot read it yet. Open Settings, tap Update engine, then try again."
+            m.contains("ffmpeg") || m.contains("postprocess") ->
+                "Converting failed. Try another quality or format."
+            else ->
+                "Something went wrong. Try Update engine in Settings.\n\nDetails: " + msg.take(200)
+        }
     }
 }
