@@ -9,6 +9,7 @@ import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.MediaScannerConnection
+import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.os.IBinder
@@ -17,31 +18,31 @@ import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import java.io.File
 import java.io.IOException
+import java.net.URL
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class DownloadService : Service() {
 
     companion object {
         const val ACTION_START = "com.example.grabit.START"
         const val ACTION_CANCEL = "com.example.grabit.CANCEL"
-        const val EXTRA_URL = "url"
-        const val EXTRA_TITLE = "title"
-        const val EXTRA_AUDIO = "audio"
-        const val EXTRA_HEIGHT = "height"
-        const val EXTRA_AUDIO_FMT = "audio_fmt"
+        const val EXTRA_ID = "id"
         const val CHANNEL_ID = "grabit_downloads"
         const val NOTIF_ID = 1
-        const val NOTIF_DONE_ID = 2
         const val PROCESS_ID = "grabit_dl"
     }
 
+    private class Saved(val uri: String, val mime: String, val name: String, val where: String)
+
     private val worker = Executors.newSingleThreadExecutor()
+    private val lock = Any()
+    private var loopRunning = false
+    private var lastStartId = 0
 
     @Volatile
-    private var running = false
-
-    @Volatile
-    private var cancelled = false
+    private var cancelRequested = false
 
     private var lastNotify = 0L
 
@@ -56,42 +57,56 @@ class DownloadService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_CANCEL) {
-            if (running) {
-                cancelled = true
-                try {
-                    YoutubeDL.getInstance().destroyProcessById(PROCESS_ID)
-                } catch (t: Throwable) {
-                }
-            } else {
-                stopSelf()
+        synchronized(lock) {
+            lastStartId = startId
+            if (intent?.action == ACTION_CANCEL) {
+                handleCancel(intent.getLongExtra(EXTRA_ID, 0L))
+                if (!loopRunning) stopSelf(startId)
+                return START_NOT_STICKY
             }
-            return START_NOT_STICKY
-        }
-
-        val url = intent?.getStringExtra(EXTRA_URL)
-        val title = intent?.getStringExtra(EXTRA_TITLE) ?: "GrabIt"
-
-        goForeground(buildProgress(title, "Starting...", 0, true))
-
-        if (url == null) {
-            if (!running) {
-                stopForeground(Service.STOP_FOREGROUND_REMOVE)
-                stopSelf()
+            goForeground(buildProgress("GrabIt", "Starting...", 0, true))
+            if (!loopRunning) {
+                loopRunning = true
+                worker.execute { loop() }
             }
-            return START_NOT_STICKY
         }
-        if (running) return START_NOT_STICKY
-
-        val audio = intent.getBooleanExtra(EXTRA_AUDIO, false)
-        val height = intent.getIntExtra(EXTRA_HEIGHT, 0)
-        val fmt = intent.getStringExtra(EXTRA_AUDIO_FMT) ?: "mp3"
-
-        running = true
-        cancelled = false
-        DownloadBus.post(DownloadBus.State("running", 0, "Starting..."))
-        worker.execute { runDownload(url, title, audio, height, fmt) }
         return START_NOT_STICKY
+    }
+
+    private fun handleCancel(id: Long) {
+        val item = if (id == 0L) {
+            Queue.items.firstOrNull { it.phase == "running" }
+        } else {
+            Queue.find(id)
+        }
+        if (item == null) return
+        if (item.phase == "queued") {
+            item.phase = "cancelled"
+            item.text = "Cancelled"
+            Queue.changed()
+        } else if (item.phase == "running") {
+            cancelRequested = true
+            try {
+                YoutubeDL.getInstance().destroyProcessById(PROCESS_ID)
+            } catch (t: Throwable) {
+            }
+        }
+    }
+
+    private fun loop() {
+        while (true) {
+            val next = synchronized(lock) {
+                val n = Queue.nextQueued()
+                if (n == null) {
+                    loopRunning = false
+                    stopForeground(Service.STOP_FOREGROUND_REMOVE)
+                    stopSelf(lastStartId)
+                }
+                n
+            }
+            if (next == null) return
+            runItem(next)
+        }
     }
 
     private fun goForeground(n: Notification) {
@@ -102,10 +117,10 @@ class DownloadService : Service() {
         }
     }
 
-    private fun openAppIntent(): PendingIntent {
-        val i = Intent(this, MainActivity::class.java)
+    private fun openIntent(cls: Class<*>, req: Int): PendingIntent {
+        val i = Intent(this, cls)
         i.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        return PendingIntent.getActivity(this, 1, i, PendingIntent.FLAG_IMMUTABLE)
+        return PendingIntent.getActivity(this, req, i, PendingIntent.FLAG_IMMUTABLE)
     }
 
     private fun buildProgress(title: String, text: String, pct: Int, indeterminate: Boolean): Notification {
@@ -121,21 +136,30 @@ class DownloadService : Service() {
             .setContentText(text)
             .setOnlyAlertOnce(true)
             .setOngoing(true)
-            .setContentIntent(openAppIntent())
+            .setContentIntent(openIntent(MainActivity::class.java, 1))
             .setProgress(100, pct, indeterminate)
             .addAction(0, "Cancel", cancelPi)
             .build()
     }
 
-    private fun notifyFinal(title: String, text: String) {
+    private fun notifyProgress(item: Queue.Item, text: String, pct: Int, indeterminate: Boolean) {
+        val more = Queue.queuedCount()
+        val title = if (more > 0) item.title + " (+" + more + " waiting)" else item.title
+        getSystemService(NotificationManager::class.java)
+            .notify(NOTIF_ID, buildProgress(title, text, pct, indeterminate))
+    }
+
+    private fun notifyFinal(item: Queue.Item, title: String, text: String, ok: Boolean) {
+        val target = if (ok) HistoryActivity::class.java else MainActivity::class.java
         val n = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle(title)
             .setContentText(text)
             .setAutoCancel(true)
-            .setContentIntent(openAppIntent())
+            .setContentIntent(openIntent(target, 2))
             .build()
-        getSystemService(NotificationManager::class.java).notify(NOTIF_DONE_ID, n)
+        val nid = (item.id % 1000000L).toInt() + 100
+        getSystemService(NotificationManager::class.java).notify(nid, n)
     }
 
     private fun fmtTime(sec: Long): String {
@@ -144,12 +168,14 @@ class DownloadService : Service() {
         return String.format("%d:%02d", m, s)
     }
 
-    private fun onProgress(title: String, p: Float, eta: Long, line: String) {
+    private fun onProgress(item: Queue.Item, p: Float, eta: Long, line: String) {
         if (p < 0f) {
             if (line.contains("[Merger]") || line.contains("[ExtractAudio]") ||
                 line.contains("[VideoConvertor]") || line.contains("[VideoRemuxer]")
             ) {
-                DownloadBus.post(DownloadBus.State("running", 100, "Converting..."))
+                item.percent = 100
+                item.text = "Converting..."
+                Queue.changed()
             }
             return
         }
@@ -159,50 +185,58 @@ class DownloadService : Service() {
         val text = listOf("$pct%", speed, etaText)
             .filter { it.isNotEmpty() }
             .joinToString("  |  ")
-        DownloadBus.post(DownloadBus.State("running", pct, text))
+        item.percent = pct
+        item.text = text
+        Queue.changed()
 
         val now = System.currentTimeMillis()
         if (now - lastNotify > 700) {
             lastNotify = now
-            getSystemService(NotificationManager::class.java)
-                .notify(NOTIF_ID, buildProgress(title, text, pct, false))
+            notifyProgress(item, text, pct, false)
         }
     }
 
-    private fun buildRequest(url: String, dir: File, audio: Boolean, height: Int, fmt: String): YoutubeDLRequest {
-        val r = YoutubeDLRequest(url)
+    private fun buildRequest(item: Queue.Item, dir: File): YoutubeDLRequest {
+        val r = YoutubeDLRequest(item.url)
         r.addOption("--no-playlist")
         r.addOption("-o", dir.absolutePath + "/%(title).80s.%(ext)s")
-        if (audio) {
-            if (fmt == "m4a") {
+        if (item.audio) {
+            if (item.fmt == "m4a") {
                 r.addOption("-f", "bestaudio[ext=m4a]/bestaudio/best")
             } else {
                 r.addOption("-f", "bestaudio/best")
             }
             r.addOption("-x")
-            r.addOption("--audio-format", fmt)
+            r.addOption("--audio-format", item.fmt)
             r.addOption("--audio-quality", "0")
         } else {
-            val h = if (height > 0) "[height<=$height]" else ""
+            val h = if (item.height > 0) "[height<=" + item.height + "]" else ""
             r.addOption("-f", "bv*${h}[ext=mp4]+ba[ext=m4a]/b${h}[ext=mp4]/bv*${h}+ba/b${h}")
             r.addOption("--merge-output-format", "mp4")
         }
         return r
     }
 
-    private fun runDownload(url: String, title: String, audio: Boolean, height: Int, fmt: String) {
-        val dir = File(cacheDir, "dl_" + System.currentTimeMillis())
+    private fun runItem(item: Queue.Item) {
+        cancelRequested = false
+        item.phase = "running"
+        item.percent = 0
+        item.text = "Starting..."
+        Queue.changed()
+        notifyProgress(item, "Starting...", 0, true)
+
+        val dir = File(cacheDir, "dl_" + item.id)
         try {
             val err = Engine.ensure(application)
             if (err != null) throw IOException("Engine failed to start: $err")
             dir.mkdirs()
 
-            val request = buildRequest(url, dir, audio, height, fmt)
+            val request = buildRequest(item, dir)
             YoutubeDL.getInstance().execute(request, PROCESS_ID) { p, eta, line ->
-                onProgress(title, p, eta, line)
+                onProgress(item, p, eta, line)
             }
 
-            if (cancelled) throw IOException("cancelled")
+            if (cancelRequested) throw IOException("cancelled")
 
             val file = dir.listFiles()
                 ?.filter {
@@ -212,28 +246,63 @@ class DownloadService : Service() {
                 ?.maxByOrNull { it.length() }
                 ?: throw IOException("No file was created")
 
-            DownloadBus.post(DownloadBus.State("running", 100, "Saving..."))
-            val where = saveToMediaStore(file, audio)
+            item.percent = 100
+            item.text = "Saving..."
+            Queue.changed()
 
-            DownloadBus.post(DownloadBus.State("done", 100, "Saved: $where"))
-            notifyFinal("Download finished", where)
+            val size = file.length()
+            val saved = saveToMediaStore(file, item.audio)
+            val thumbPath = saveThumb(item)
+
+            History.add(
+                this,
+                History.Entry(
+                    item.id, item.title, item.uploader, saved.uri, saved.mime,
+                    item.audio, saved.name, thumbPath, System.currentTimeMillis(), size
+                )
+            )
+
+            item.phase = "done"
+            item.percent = 100
+            item.text = "Saved: " + saved.where
+            Queue.changed()
+            notifyFinal(item, "Download finished", item.title, true)
         } catch (t: Throwable) {
-            if (cancelled) {
-                DownloadBus.post(DownloadBus.State("cancelled", 0, "Cancelled"))
-                notifyFinal("Download cancelled", title)
+            if (cancelRequested) {
+                item.phase = "cancelled"
+                item.text = "Cancelled"
+                Queue.changed()
+                notifyFinal(item, "Download cancelled", item.title, false)
             } else {
                 val msg = Engine.friendly(t.message ?: t.toString())
-                DownloadBus.post(DownloadBus.State("error", 0, msg))
-                notifyFinal("Download failed", msg.take(100))
+                item.phase = "error"
+                item.text = msg
+                Queue.changed()
+                notifyFinal(item, "Download failed", msg.take(100), false)
             }
         } finally {
             try {
                 dir.deleteRecursively()
             } catch (t: Throwable) {
             }
-            running = false
-            stopForeground(Service.STOP_FOREGROUND_REMOVE)
-            stopSelf()
+        }
+    }
+
+    private fun saveThumb(item: Queue.Item): String {
+        if (item.thumbUrl.isEmpty()) return ""
+        return try {
+            val dir = File(filesDir, "thumbs")
+            dir.mkdirs()
+            val f = File(dir, item.id.toString() + ".jpg")
+            val conn = URL(item.thumbUrl).openConnection()
+            conn.connectTimeout = 8000
+            conn.readTimeout = 8000
+            conn.getInputStream().use { input ->
+                f.outputStream().use { out -> input.copyTo(out) }
+            }
+            f.absolutePath
+        } catch (e: Exception) {
+            ""
         }
     }
 
@@ -249,8 +318,7 @@ class DownloadService : Service() {
         }
     }
 
-    // Returns a short text like "Movies/GrabIt/name.mp4"
-    private fun saveToMediaStore(file: File, audio: Boolean): String {
+    private fun saveToMediaStore(file: File, audio: Boolean): Saved {
         val name = file.name
         val mime = mimeFor(file.extension.lowercase(), audio)
         val folder = if (audio) Environment.DIRECTORY_MUSIC else Environment.DIRECTORY_MOVIES
@@ -276,14 +344,36 @@ class DownloadService : Service() {
             val done = ContentValues()
             done.put(MediaStore.MediaColumns.IS_PENDING, 0)
             contentResolver.update(uri, done, null, null)
-        } else {
-            val base = Environment.getExternalStoragePublicDirectory(folder)
-            val dir = File(base, "GrabIt")
-            dir.mkdirs()
-            val dest = File(dir, name)
-            file.copyTo(dest, overwrite = true)
-            MediaScannerConnection.scanFile(this, arrayOf(dest.absolutePath), arrayOf(mime), null)
+            return Saved(uri.toString(), mime, name, "$folder/GrabIt/$name")
         }
-        return "$folder/GrabIt/$name"
+
+        val base = Environment.getExternalStoragePublicDirectory(folder)
+        val dir = File(base, "GrabIt")
+        dir.mkdirs()
+        var dest = File(dir, name)
+        if (dest.exists()) {
+            dest = File(
+                dir,
+                file.nameWithoutExtension + "_" + System.currentTimeMillis() + "." + file.extension
+            )
+        }
+        file.copyTo(dest, overwrite = true)
+
+        val latch = CountDownLatch(1)
+        var scanned: Uri? = null
+        MediaScannerConnection.scanFile(
+            this, arrayOf(dest.absolutePath), arrayOf(mime)
+        ) { _, u ->
+            scanned = u
+            latch.countDown()
+        }
+        latch.await(4, TimeUnit.SECONDS)
+        val uriStr = scanned?.toString() ?: ""
+        return Saved(uriStr, mime, dest.name, "$folder/GrabIt/" + dest.name)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        worker.shutdown()
     }
 }
