@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GrabIt - Video and audio downloader for Android</title>
+<meta name="description" content="GrabIt saves public videos and audio from YouTube, Instagram and Facebook to your Android phone.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230A0A0F'/%3E%3Cpath d='M43 18h14v30h18L50 74 25 48h18z' fill='%2300E5FF'/%3E%3Crect x='25' y='80' width='50' height='7' fill='%2300FF9C'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #0A0A0F;
+  --card: #14141C;
+  --line: #1E2A33;
+  --text: #E8F1F5;
+  --muted: #8FA0AB;
+  --cyan: #00E5FF;
+  --green: #00FF9C;
+  --warn: #FFB020;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Courier New", monospace;
+  line-height: 1.6;
+  font-size: 15px;
+}
+.wrap { max-width: 760px; margin: 0 auto; padding: 0 18px; }
+header { padding: 56px 0 28px; text-align: center; }
+.logo {
+  width: 84px; height: 84px; margin: 0 auto 14px; border-radius: 20px;
+  background: var(--card); border: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 28px rgba(0, 229, 255, 0.25);
+}
+h1 {
+  margin: 0; font-size: 44px; letter-spacing: 1px; color: var(--cyan);
+  text-shadow: 0 0 18px rgba(0, 229, 255, 0.45);
+}
+.tag { margin: 8px 0 0; color: var(--muted); }
+.btn {
+  display: inline-block; margin-top: 22px; padding: 15px 30px;
+  border: 2px solid var(--green); border-radius: 14px;
+  color: var(--green); background: rgba(0, 255, 156, 0.08);
+  font-weight: bold; font-size: 17px; text-decoration: none; font-family: inherit;
+  box-shadow: 0 0 22px rgba(0, 255, 156, 0.25);
+}
+.btn:hover, .btn:focus { background: rgba(0, 255, 156, 0.2); }
+.small { color: var(--muted); font-size: 13px; margin-top: 10px; }
+section { margin: 30px 0; }
+h2 { color: var(--cyan); font-size: 22px; margin: 0 0 12px; }
+.card {
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: 16px; padding: 16px; margin-bottom: 12px;
+}
+.card h3 { margin: 0 0 6px; color: var(--green); font-size: 16px; }
+.card p { margin: 0; color: var(--text); }
+.grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 600px) { .grid { grid-template-columns: 1fr 1fr; } }
+.grid .card { margin: 0; }
+ol, ul { margin: 0; padding-left: 22px; }
+li { margin: 8px 0; }
+.legal { border-color: var(--warn); }
+.legal h2 { color: var(--warn); }
+.legal .card { border-color: var(--warn); }
+b { color: var(--green); }
+code {
+  background: #0F1117; border: 1px solid var(--line); border-radius: 6px;
+  padding: 1px 6px; color: var(--cyan);
+}
+details {
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: 14px; padding: 12px 16px; margin-bottom: 10px;
+}
+summary { cursor: pointer; color: var(--green); font-weight: bold; }
+details p, details ol, details ul { margin: 10px 0 0; }
+footer {
+  text-align: center; color: var(--muted); font-size: 13px;
+  padding: 30px 0 50px; border-top: 1px solid var(--line); margin-top: 30px;
+}
+</style>
+</head>
+<body>
+
+<header class="wrap">
+  <div class="logo">
+    <svg width="52" height="52" viewBox="0 0 100 100" aria-hidden="true">
+      <path d="M43 14h14v30h18L50 70 25 44h18z" fill="#00E5FF"/>
+      <rect x="25" y="78" width="50" height="8" fill="#00FF9C"/>
+    </svg>
+  </div>
+  <h1>GrabIt</h1>
+  <p class="tag">Paste a link. Pick video or audio. Save it.</p>
+  <a class="btn" href="https://github.com/dwipayanmondal233-cloud/GrabIt/releases/latest/download/GrabIt.apk">Download APK</a>
+  <p class="small">Android 8.0 or newer. Size about 60 to 100 MB. Always the newest build.</p>
+</header>
+
+<main class="wrap">
+
+  <section>
+    <h2>What it does</h2>
+    <div class="grid">
+      <div class="card"><h3>Paste or share</h3><p>Paste a link, or use the Android Share button in YouTube or Instagram and pick GrabIt.</p></div>
+      <div class="card"><h3>Video or audio</h3><p>Video in 360p, 480p, 720p, 1080p or best. Audio as MP3 or M4A.</p></div>
+      <div class="card"><h3>Keeps going</h3><p>Live progress, speed and time left. Downloads continue when you leave the app.</p></div>
+      <div class="card"><h3>Queue and history</h3><p>Add many links. Open, share or delete finished files from History.</p></div>
+      <div class="card"><h3>Saved in your gallery</h3><p>Files go to Movies, Music or Downloads. No storage permission on Android 10 and up.</p></div>
+      <div class="card"><h3>Update engine</h3><p>One tap updates yt-dlp inside the app, so it can keep up when sites change.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>How to install</h2>
+    <div class="card">
+      <ol>
+        <li>Tap <b>Download APK</b> above.</li>
+        <li>Open the file. If Android asks, allow your browser to <b>install unknown apps</b>.</li>
+        <li>If <b>Play Protect</b> warns, see the fix below.</li>
+        <li>Open GrabIt and accept the notice.</li>
+        <li>Set <b>Battery to Unrestricted</b>: Settings, Apps, GrabIt, Battery, Unrestricted. This stops Android killing long downloads.</li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="legal">
+    <h2>Read this first</h2>
+    <div class="card">
+      <ul>
+        <li><b>Personal use only.</b> Only save content you own or have permission to save.</li>
+        <li>Downloading from YouTube may break its Terms of Service. You are responsible for what you download.</li>
+        <li>GrabIt saves <b>public</b> videos only. It does not bypass logins, DRM or paywalls.</li>
+        <li>No analytics and no tracking. Nothing is uploaded. The app only makes normal requests to the video sites you ask for, and to GitHub when you tap Update engine.</li>
+        <li>This app is not on the Play Store. It is shared only by this page.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>Problems and fixes</h2>
+
+    <details>
+      <summary>Play Protect blocks or warns on install</summary>
+      <ol>
+        <li>Open the <b>Play Store</b>, tap your <b>profile</b> picture.</li>
+        <li>Tap <b>Play Protect</b>, then the <b>gear</b> icon.</li>
+        <li>Turn <b>off</b> scanning apps with Play Protect.</li>
+        <li>Install GrabIt.</li>
+        <li>Turn scanning back <b>on</b>.</li>
+      </ol>
+    </details>
+
+    <details>
+      <summary>"App not installed" when updating</summary>
+      <p>Test builds change their signature on every build. <b>Uninstall the old GrabIt first</b>, then install the new one. Your saved files stay in your gallery. History is cleared.</p>
+    </details>
+
+    <details>
+      <summary>A link stops working or says "site changed"</summary>
+      <p>Sites change often, and Instagram and Facebook break more often than YouTube. Open <b>Settings</b>, tap <b>Update engine</b>, then try again. If it still fails, wait a day or two. The yt-dlp project usually fixes it fast.</p>
+    </details>
+
+    <details>
+      <summary>"Private or needs a login"</summary>
+      <p>GrabIt only saves public videos. Private, age-restricted and members-only videos cannot be saved.</p>
+    </details>
+
+    <details>
+      <summary>Download stops when I leave the app</summary>
+      <p>Set Battery to <b>Unrestricted</b> for GrabIt (Settings, Apps, GrabIt, Battery). Also allow notifications, so you can see and cancel downloads.</p>
+    </details>
+
+    <details>
+      <summary>"Wi-Fi only is ON"</summary>
+      <p>Connect to Wi-Fi, or turn the option off in GrabIt Settings.</p>
+    </details>
+
+    <details>
+      <summary>The video will not play or share from History</summary>
+      <p>The file may have been deleted or moved. Check <code>Movies/GrabIt</code>, <code>Music/GrabIt</code> or <code>Downloads/GrabIt</code> in your Files app.</p>
+    </details>
+
+    <details>
+      <summary>"No internet" even though I am online</summary>
+      <p>Turn Wi-Fi off and on, or switch to mobile data. Then try again.</p>
+    </details>
+  </section>
+
+</main>
+
+<footer class="wrap">
+  GrabIt, powered by yt-dlp and FFmpeg. Personal use only.<br>
+  <a href="https://github.com/dwipayanmondal233-cloud/GrabIt" style="color:#00E5FF">Source on GitHub</a>
+</footer>
+
+</body>
+</html>
