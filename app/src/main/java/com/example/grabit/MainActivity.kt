@@ -34,6 +34,7 @@ class MainActivity : Activity() {
     private lateinit var pasteBtn: Button
     private lateinit var infoBtn: Button
     private lateinit var historyBtn: Button
+    private lateinit var settingsBtn: Button
     private lateinit var progress: ProgressBar
     private lateinit var status: TextView
     private lateinit var thumb: ImageView
@@ -41,6 +42,7 @@ class MainActivity : Activity() {
     private lateinit var metaText: TextView
     private lateinit var optionsCard: View
     private lateinit var radioGroup: RadioGroup
+    private lateinit var rbVideo: RadioButton
     private lateinit var rbAudio: RadioButton
     private lateinit var formatSpinner: Spinner
     private lateinit var addBtn: Button
@@ -58,6 +60,7 @@ class MainActivity : Activity() {
     private var currentThumbUrl = ""
     private var clipLink = ""
     private var lastOffered = ""
+    private var themeAtCreate = 0
 
     private val rows = HashMap<Long, View>()
 
@@ -68,11 +71,13 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        themeAtCreate = Prefs.theme(this)
 
         urlInput = findViewById(R.id.urlInput)
         pasteBtn = findViewById(R.id.pasteBtn)
         infoBtn = findViewById(R.id.infoBtn)
         historyBtn = findViewById(R.id.historyBtn)
+        settingsBtn = findViewById(R.id.settingsBtn)
         progress = findViewById(R.id.progress)
         status = findViewById(R.id.status)
         thumb = findViewById(R.id.thumb)
@@ -80,6 +85,7 @@ class MainActivity : Activity() {
         metaText = findViewById(R.id.metaText)
         optionsCard = findViewById(R.id.optionsCard)
         radioGroup = findViewById(R.id.radioGroup)
+        rbVideo = findViewById(R.id.rbVideo)
         rbAudio = findViewById(R.id.rbAudio)
         formatSpinner = findViewById(R.id.formatSpinner)
         addBtn = findViewById(R.id.addBtn)
@@ -91,6 +97,8 @@ class MainActivity : Activity() {
         queueEmpty = findViewById(R.id.queueEmpty)
         clearQueueBtn = findViewById(R.id.clearQueueBtn)
 
+        Style.apply(findViewById<View>(android.R.id.content))
+
         fillSpinner(false)
         radioGroup.setOnCheckedChangeListener { _, id -> fillSpinner(id == R.id.rbAudio) }
 
@@ -98,6 +106,7 @@ class MainActivity : Activity() {
         infoBtn.setOnClickListener { onGetInfo() }
         addBtn.setOnClickListener { onAdd() }
         historyBtn.setOnClickListener { startActivity(Intent(this, HistoryActivity::class.java)) }
+        settingsBtn.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         clearQueueBtn.setOnClickListener { Queue.clearFinished() }
         clipUse.setOnClickListener {
             urlInput.setText(clipLink)
@@ -112,12 +121,21 @@ class MainActivity : Activity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
 
+        if (!Prefs.noticeAccepted(this)) {
+            Notice.showFirstRun(this) { }
+        }
+
         progress.visibility = View.VISIBLE
         worker.execute {
             val err = Engine.ensure(application)
+            val ver = if (err == null) Engine.version(application) else ""
             runOnUiThread {
                 progress.visibility = View.GONE
-                status.text = if (err == null) "Engine ready" else "Engine failed to start: $err"
+                status.text = if (err == null) {
+                    "Engine ready | yt-dlp $ver"
+                } else {
+                    "Engine failed to start: $err"
+                }
             }
         }
 
@@ -132,6 +150,10 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        if (Prefs.theme(this) != themeAtCreate) {
+            recreate()
+            return
+        }
         Queue.listener = { renderQueue() }
         renderQueue()
     }
@@ -188,6 +210,13 @@ class MainActivity : Activity() {
         formatSpinner.adapter = adapter
     }
 
+    private fun applyDefaults() {
+        val audio = Prefs.defaultAudio(this)
+        if (audio) rbAudio.isChecked = true else rbVideo.isChecked = true
+        fillSpinner(audio)
+        formatSpinner.setSelection(if (audio) Prefs.audioFmt(this) else Prefs.quality(this))
+    }
+
     private fun renderQueue() {
         val items = Queue.items.toList()
         val ids = items.map { it.id }.toSet()
@@ -205,27 +234,30 @@ class MainActivity : Activity() {
             var v = rows[item.id]
             if (v == null) {
                 v = layoutInflater.inflate(R.layout.item_queue, queueList, false)
+                Style.apply(v)
                 rows[item.id] = v
                 queueList.addView(v)
             }
-            val qTitle = v.findViewById<TextView>(R.id.qTitle)
-            val qBar = v.findViewById<ProgressBar>(R.id.qBar)
-            val qText = v.findViewById<TextView>(R.id.qText)
-            val qCancel = v.findViewById<Button>(R.id.qCancel)
+            v?.let { view ->
+                val qTitle = view.findViewById<TextView>(R.id.qTitle)
+                val qBar = view.findViewById<ProgressBar>(R.id.qBar)
+                val qText = view.findViewById<TextView>(R.id.qText)
+                val qCancel = view.findViewById<Button>(R.id.qCancel)
 
-            qTitle.text = item.title
-            qText.text = item.text
-            if (item.phase == "running") {
-                qBar.visibility = View.VISIBLE
-                qBar.progress = item.percent
-            } else {
-                qBar.visibility = View.GONE
-            }
-            if (item.phase == "queued" || item.phase == "running") {
-                qCancel.visibility = View.VISIBLE
-                qCancel.setOnClickListener { cancelItem(item.id) }
-            } else {
-                qCancel.visibility = View.GONE
+                qTitle.text = item.title
+                qText.text = item.text
+                if (item.phase == "running") {
+                    qBar.visibility = View.VISIBLE
+                    qBar.progress = item.percent
+                } else {
+                    qBar.visibility = View.GONE
+                }
+                if (item.phase == "queued" || item.phase == "running") {
+                    qCancel.visibility = View.VISIBLE
+                    qCancel.setOnClickListener { cancelItem(item.id) }
+                } else {
+                    qCancel.visibility = View.GONE
+                }
             }
         }
         queueEmpty.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
@@ -250,6 +282,15 @@ class MainActivity : Activity() {
 
     private fun onAdd() {
         if (currentUrl.isEmpty()) return
+
+        if (Prefs.wifiOnly(this) && !NetUtil.onWifi(this)) {
+            Toast.makeText(
+                this,
+                "Wi-Fi only is ON. Connect to Wi-Fi, or change it in Settings.",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
 
         if (Build.VERSION.SDK_INT < 29 &&
             checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
@@ -287,6 +328,10 @@ class MainActivity : Activity() {
         val url = urlInput.text.toString().trim()
         if (!url.startsWith("http://") && !url.startsWith("https://")) {
             Toast.makeText(this, "Paste a link that starts with http", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (!NetUtil.online(this)) {
+            status.text = "No internet. Check your connection and try again."
             return
         }
 
@@ -338,6 +383,7 @@ class MainActivity : Activity() {
                         thumb.setImageBitmap(finalBmp)
                         thumb.visibility = View.VISIBLE
                     }
+                    applyDefaults()
                     optionsCard.visibility = View.VISIBLE
                     progress.visibility = View.GONE
                     infoBtn.isEnabled = true

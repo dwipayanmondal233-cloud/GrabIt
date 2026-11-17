@@ -35,6 +35,7 @@ class HistoryActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_history)
+        Style.apply(findViewById<View>(android.R.id.content))
 
         listView = findViewById(R.id.list)
         emptyText = findViewById(R.id.emptyText)
@@ -171,7 +172,7 @@ class HistoryActivity : Activity() {
         override fun getItemId(position: Int): Long = entries[position].id
 
         override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
-            val v = convertView ?: layoutInflater.inflate(R.layout.item_history, parent, false)
+           val v = convertView ?: layoutInflater.inflate(R.layout.item_history, parent, false).also { Style.apply(it) }
             val e = entries[position]
 
             val img = v.findViewById<ImageView>(R.id.hThumb)

@@ -105,7 +105,15 @@ class DownloadService : Service() {
                 n
             }
             if (next == null) return
-            runItem(next)
+
+            if (Prefs.wifiOnly(this) && !NetUtil.onWifi(this)) {
+                next.phase = "error"
+                next.text = "Wi-Fi only is ON. Connect to Wi-Fi, or turn it off in Settings."
+                Queue.changed()
+                notifyFinal(next, "Download blocked", next.text, false)
+            } else {
+                runItem(next)
+            }
         }
     }
 
@@ -199,6 +207,7 @@ class DownloadService : Service() {
     private fun buildRequest(item: Queue.Item, dir: File): YoutubeDLRequest {
         val r = YoutubeDLRequest(item.url)
         r.addOption("--no-playlist")
+        r.addOption("--retries", "3")
         r.addOption("-o", dir.absolutePath + "/%(title).80s.%(ext)s")
         if (item.audio) {
             if (item.fmt == "m4a") {
@@ -321,7 +330,14 @@ class DownloadService : Service() {
     private fun saveToMediaStore(file: File, audio: Boolean): Saved {
         val name = file.name
         val mime = mimeFor(file.extension.lowercase(), audio)
-        val folder = if (audio) Environment.DIRECTORY_MUSIC else Environment.DIRECTORY_MOVIES
+        val useDownloads = Prefs.saveFolder(this) == 1
+        val folder = if (useDownloads) {
+            Environment.DIRECTORY_DOWNLOADS
+        } else if (audio) {
+            Environment.DIRECTORY_MUSIC
+        } else {
+            Environment.DIRECTORY_MOVIES
+        }
 
         if (Build.VERSION.SDK_INT >= 29) {
             val values = ContentValues()
@@ -330,7 +346,9 @@ class DownloadService : Service() {
             values.put(MediaStore.MediaColumns.RELATIVE_PATH, "$folder/GrabIt")
             values.put(MediaStore.MediaColumns.IS_PENDING, 1)
 
-            val collection = if (audio) {
+            val collection = if (useDownloads) {
+                MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            } else if (audio) {
                 MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
             } else {
                 MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
